@@ -1,0 +1,14 @@
+{
+    "a": {
+        "file": "path_to_audio1.mp3",
+        "enabled": true
+    },
+    "1": {
+        "file": "path_to_audio2.wav",
+        "enabled": false
+    },
+    "space": {
+        "file": "path_to_audio2.ogg",
+        "enabled": true
+    }
+}
