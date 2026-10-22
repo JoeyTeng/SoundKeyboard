@@ -8,6 +8,8 @@ dependencies = [
     "pygame>=2.5.2",
     "PyQt5>=5.15",
     "keyboard>=0.13.5; sys_platform == 'win32'",
+    "pyobjc-framework-Cocoa>=10.0; sys_platform == 'darwin'",
+    "pyobjc-framework-Quartz>=10.0; sys_platform == 'darwin'",
 ]
 
 [dependency-groups]
