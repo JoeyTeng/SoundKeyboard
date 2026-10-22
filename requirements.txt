@@ -119,7 +119,10 @@ pyqt5==5.15.11 \
     --hash=sha256:cd672a6738d1ae33ef7d9efa8e6cb0a1525ecf53ec86da80a9e1b6ec38c8d0f1 \
     --hash=sha256:fda45743ebb4a27b4b1a51c6d8ef455c4c1b5d610c90d2934c7802b5c1557c52
     # via soundkeyboard
-pyqt5-qt5==5.15.19 \
+pyqt5-qt5==5.15.2 ; platform_machine == 'AMD64' and sys_platform == 'win32' \
+    --hash=sha256:750b78e4dba6bdf1607febedc08738e318ea09e9b10aea9ff0d73073f11f6962
+    # via pyqt5
+pyqt5-qt5==5.15.19 ; platform_machine != 'AMD64' or sys_platform != 'win32' \
     --hash=sha256:31421d9c31fb29a8faee4b8b3c32658fb51a9e8c4c708075121162fa44faf80e \
     --hash=sha256:66fa299dcdea1f430edbd6f6ca3dcb20430f19c508d13e3aa851d19034b7be7e \
     --hash=sha256:cac6b78e4805848c25979a0622660251070781b6b4f810688a960cb44d1ae5a2

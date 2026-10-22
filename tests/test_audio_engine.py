@@ -79,6 +79,15 @@ def test_source_default_pack_is_next_to_audio_module(monkeypatch, tmp_path):
     assert get_default_pack_path() == expected
 
 
+def test_invalid_utf8_rules_do_not_prevent_startup(tmp_path):
+    (tmp_path / "rule.json").write_bytes(b"\xff\xfeinvalid rules")
+    engine = AudioEngine(pack_dir=str(tmp_path))
+    try:
+        assert engine.rules == {}
+    finally:
+        pygame.mixer.quit()
+
+
 def test_frozen_default_pack_is_next_to_executable(monkeypatch, tmp_path):
     monkeypatch.setattr("audio_engine.sys.frozen", True, raising=False)
     monkeypatch.setattr("audio_engine.sys.executable", str(tmp_path / "SoundKeyboard.exe"))

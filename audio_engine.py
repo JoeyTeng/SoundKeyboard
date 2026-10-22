@@ -97,7 +97,7 @@ class AudioEngine:
                 try:
                     with open(rule_path, encoding="utf-8") as stream:
                         self.rules = json.load(stream)
-                except (OSError, json.JSONDecodeError):
+                except (OSError, UnicodeError, json.JSONDecodeError):
                     pass
         else:
             self.save_rules()
