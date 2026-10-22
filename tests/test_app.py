@@ -120,6 +120,29 @@ def test_capture_unhooks_on_close(window, app):
     assert "capture" not in window.backend.callbacks
 
 
+@pytest.mark.parametrize(
+    ("platform", "qt_key", "canonical"),
+    [
+        ("darwin", Qt.Key_Control, "win"),
+        ("darwin", Qt.Key_Meta, "ctrl"),
+        ("win32", Qt.Key_Control, "ctrl"),
+        ("win32", Qt.Key_Meta, "win"),
+    ],
+)
+def test_capture_fallback_modifier_names_match_native_backend(
+    window, app, monkeypatch, platform, qt_key, canonical
+):
+    window.backend.error = "No global access"
+    monkeypatch.setattr(main.sys, "platform", platform)
+    dialog = main.KeyCaptureDialog(window.settings_dialog)
+    dialog.show()
+    app.processEvents()
+    event = QKeyEvent(QKeyEvent.KeyPress, qt_key, Qt.NoModifier)
+    dialog.keyPressEvent(event)
+    assert dialog.captured_key == canonical
+    dialog.close()
+
+
 def test_capture_from_listener_thread_updates_ui_on_main_thread(window, app):
     dialog = main.KeyCaptureDialog(window.settings_dialog)
     dialog.show()

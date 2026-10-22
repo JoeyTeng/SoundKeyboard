@@ -112,6 +112,9 @@ class KeyCaptureDialog(QDialog):
             Qt.Key_PageUp: "pageup",
             Qt.Key_PageDown: "pagedown",
         }
+        if sys.platform == "darwin":
+            # Qt maps Command to Key_Control and Control to Key_Meta on macOS.
+            keys.update({Qt.Key_Control: "win", Qt.Key_Meta: "ctrl"})
         if self._hook_id is None:
             self._set_key(keys.get(e.key(), normalize_key(e.text())))
         e.accept()

@@ -603,6 +603,7 @@ class MacOSBackend:
                     event_type == quartz.kCGEventTapDisabledByTimeout
                     or event_type == quartz.kCGEventTapDisabledByUserInput
                 ):
+                    self._release_held_modifiers()
                     if self._tap is not None:
                         quartz.CGEventTapEnable(self._tap, True)
                     return event
@@ -613,6 +614,10 @@ class MacOSBackend:
                     == self._SYNTHETIC_MARKER
                 ):
                     return event
+                # A missed modifier release can leave tracked state behind.
+                # Reconcile only keys we previously saw go down; discovering
+                # arbitrary held keys here would create synthetic presses.
+                self._sync_held_modifiers()
                 keycode = int(
                     quartz.CGEventGetIntegerValueField(event, quartz.kCGKeyboardEventKeycode)
                 )
@@ -687,28 +692,60 @@ class MacOSBackend:
         modifier = _MAC_MODIFIERS.get(keycode)
         if modifier is None:
             return
-        name, flag_name = modifier
+        name, _ = modifier
         # Caps Lock is a latched state, not a held modifier. Treat each
         # flags-changed event as a complete key press so it cannot stick.
         if keycode == 57:
             self._dispatch(KeyEvent(name, KEY_DOWN, None))
             self._dispatch(KeyEvent(name, KEY_UP, None))
             return
-        # Quartz flags aggregate both sides of a modifier. Toggling this
-        # physical key's state preserves independent left/right transitions
-        # even when the other side remains held and the aggregate flag stays set.
-        was_down = keycode in self._held_modifiers
-        mask = int(getattr(self._quartz, flag_name, 0))
-        is_flagged = bool(mask and self._quartz.CGEventGetFlags(event) & mask)
-        if not was_down and not is_flagged:
-            # The tap may have started after this key was pressed. A release
-            # with no observed press must not turn into a phantom key-down.
+        is_down = self._physical_key_is_down(keycode)
+        if is_down is None:
+            # Keep a conservative compatibility fallback for Quartz wrappers
+            # that lack the key-state API. Do not infer an unseen down from an
+            # aggregate flag after listening starts.
+            if keycode in self._held_modifiers:
+                self._held_modifiers.pop(keycode, None)
+                self._dispatch(KeyEvent(name, KEY_UP, None))
             return
-        if not was_down:
+        was_down = keycode in self._held_modifiers
+        if is_down and not was_down:
             self._held_modifiers[keycode] = name
-        else:
+            self._dispatch(KeyEvent(name, KEY_DOWN, None))
+        elif was_down and not is_down:
             self._held_modifiers.pop(keycode, None)
-        self._dispatch(KeyEvent(name, KEY_UP if was_down else KEY_DOWN, None))
+            self._dispatch(KeyEvent(name, KEY_UP, None))
+
+    def _physical_key_is_down(self, keycode: int) -> bool | None:
+        """Read one physical key's state without using aggregate modifier flags."""
+        quartz = self._quartz
+        state_query = getattr(quartz, "CGEventSourceKeyState", None)
+        state_id = getattr(quartz, "kCGEventSourceStateHIDSystemState", None)
+        if state_query is None or state_id is None:
+            return None
+        try:
+            return bool(state_query(state_id, keycode))
+        except Exception:
+            return None
+
+    def _sync_held_modifiers(self) -> None:
+        """Release tracked modifiers whose physical key is no longer down."""
+        releases: list[KeyEvent] = []
+        with self._lock:
+            for keycode, name in tuple(self._held_modifiers.items()):
+                if self._physical_key_is_down(keycode) is False:
+                    self._held_modifiers.pop(keycode, None)
+                    releases.append(KeyEvent(name, KEY_UP, None))
+        for event in releases:
+            self._dispatch(event)
+
+    def _release_held_modifiers(self) -> None:
+        releases: list[KeyEvent] = []
+        with self._lock:
+            releases = [KeyEvent(name, KEY_UP, None) for name in self._held_modifiers.values()]
+            self._held_modifiers.clear()
+        for event in releases:
+            self._dispatch(event)
 
     def unhook(self, token: object) -> None:
         with self._lock:
