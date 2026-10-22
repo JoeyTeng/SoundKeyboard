@@ -9,7 +9,13 @@ a = Analysis(
     pathex=[str(root)],
     binaries=[],
     datas=[(str(icon), ".")],
-    hiddenimports=["keyboard"] if sys.platform == "win32" else [],
+    hiddenimports=(
+        ["keyboard"]
+        if sys.platform == "win32"
+        else ["Quartz", "CoreFoundation", "AppKit"]
+        if sys.platform == "darwin"
+        else []
+    ),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

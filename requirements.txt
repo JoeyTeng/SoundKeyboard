@@ -111,6 +111,28 @@ pygame==2.6.1 \
     --hash=sha256:da3ad64d685f84a34ebe5daacb39fff14f1251acb34c098d760d63fee768f50c \
     --hash=sha256:f3935459109da4bb0b3901da9904f0a3e52028a3332a355d298b1673a334cf21
     # via soundkeyboard
+pyobjc-core==12.2.2 ; sys_platform == 'darwin' \
+    --hash=sha256:122e6ad302a2abf5d4d4adb0156db751600ddf2768441696cba17b31323085e7 \
+    --hash=sha256:3906452339cd06a3bb07df103c2511d4cb0f7a22d8771c0b802eba15d9a642b6 \
+    --hash=sha256:56c6c39f1de059fcbb174ebca5525505fc8feaa89be2a28c329bf09b6b25ee75 \
+    --hash=sha256:b9cdd686e32db8e451feb19f8a85bc4cd52c2893103881d04aca51e1f35371d1
+    # via
+    #   pyobjc-framework-cocoa
+    #   pyobjc-framework-quartz
+pyobjc-framework-cocoa==12.2.2 ; sys_platform == 'darwin' \
+    --hash=sha256:5a751c8033a3b51f7996f0327e0675eb44dcfdfe7920fae01e3d78b662723fff \
+    --hash=sha256:851dca4c16e70b405e5cd5a8c166cf7c445ae54a4cdd95ce9a523803172f32d1 \
+    --hash=sha256:c96c0ef69a71afbbb0e6a7d594b455c5fe47d62e0db376ee7a2b4b828c16ace9 \
+    --hash=sha256:e106f395531e67694376b0f1184612cbeea3ec8b9bf56b55ef41d026171d2a2d
+    # via
+    #   pyobjc-framework-quartz
+    #   soundkeyboard
+pyobjc-framework-quartz==12.2.2 ; sys_platform == 'darwin' \
+    --hash=sha256:4b01e325b0cdc121e78730dde9756e971b23069bf141cd62efbcaac76d7b6dbb \
+    --hash=sha256:7f668979d0c7320bf8f7ed6e030da578f93ab0f5dd619b295ec735cd8d5faa34 \
+    --hash=sha256:810f97b210cfd93704d240860286dfd6df09f9f1c52525fc5c2166723aea3f9e \
+    --hash=sha256:d89a5f47c079b5c340d2b1cbb83eb6c4c92d4bb17cd4daf7d8c02c91a49f5399
+    # via soundkeyboard
 pyqt5==5.15.11 \
     --hash=sha256:6cd75628f6e732b1ffcfe709ab833a0716c0445d7aec8046a48d5843352becb6 \
     --hash=sha256:76be0322ceda5deecd1708a8d628e698089a1cea80d1a49d242a6d579a40babd \

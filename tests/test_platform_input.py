@@ -1,0 +1,226 @@
+import sys
+import threading
+from types import SimpleNamespace
+
+import pytest
+
+import platform_input as input_api
+
+
+def test_windows_legacy_normalization_preserves_scan_code_precedence():
+    assert input_api.normalize_key("right shift", 42) == "shift"
+    assert input_api.normalize_key("A") == "a"
+    assert input_api.normalize_key("?") == "/"
+    assert input_api.normalize_key("caps lock") == "caps"
+    assert input_api.normalize_key("", 0) == ""
+
+
+def test_mac_ansi_keycode_zero_and_modifier_names_are_not_scan_codes():
+    assert input_api._MAC_KEYCODES[0] == "a"
+    assert input_api.normalize_key("a", None) == "a"
+    assert input_api.normalize_key("cmd", None) == "win"
+    assert input_api.normalize_key("command", None) == "win"
+    assert input_api.normalize_key("option", None) == "alt"
+    assert input_api._WINDOWS_VK_MAP["a"] == 0x41
+    assert input_api._WINDOWS_VK_MAP["z"] == 0x5A
+    assert input_api._MAC_POST_KEYCODES["1"] == 18
+    assert input_api._MAC_POST_KEYCODES["a"] == 0
+    assert input_api._MAC_POST_KEYCODES["win"] == 55
+    assert input_api._MAC_POST_KEYCODES["rwin"] == 54
+    assert input_api._MAC_KEYCODES[55] == "cmd"
+    assert input_api._MAC_KEYCODES[58] == "alt"
+
+
+def test_create_backend_selects_platform_lazily(monkeypatch):
+    monkeypatch.setattr(input_api.sys, "platform", "darwin")
+    backend = input_api.create_backend()
+    assert isinstance(backend, input_api.MacOSBackend)
+    assert backend._thread is None
+    assert backend._quartz is None
+
+    monkeypatch.setattr(input_api.sys, "platform", "win32")
+    assert isinstance(input_api.create_backend(), input_api.WindowsBackend)
+
+
+def test_mac_flags_changed_tracks_both_modifier_sides_and_release_cleanup():
+    backend = input_api.MacOSBackend()
+    backend._quartz = SimpleNamespace(
+        kCGEventFlagMaskShift=1,
+        kCGEventFlagMaskControl=2,
+        CGEventGetFlags=lambda event: event.flags,
+    )
+    events = []
+    backend._tokens[object()] = events.append
+    backend._stop_tap = lambda: None
+    left_shift = SimpleNamespace(flags=1)
+    right_shift = SimpleNamespace(flags=1)
+    released_shift = SimpleNamespace(flags=1)
+
+    backend._dispatch_modifier(56, left_shift)
+    backend._dispatch_modifier(60, right_shift)
+    backend._dispatch_modifier(56, released_shift)
+    assert [(event.name, event.event_type) for event in events] == [
+        ("shift", "down"),
+        ("rshift", "down"),
+        ("shift", "up"),
+    ]
+    assert backend._held_modifiers == {60: "rshift"}
+
+    backend.unhook_all()
+    assert events[-1] == input_api.KeyEvent("rshift", input_api.KEY_UP, None)
+    assert backend._held_modifiers == {}
+
+
+def test_mac_event_tap_ignores_private_synthetic_marker():
+    backend = input_api.MacOSBackend()
+    backend._quartz = SimpleNamespace(
+        kCGEventKeyDown=10,
+        kCGEventKeyUp=11,
+        kCGEventFlagsChanged=12,
+        kCGEventTapDisabledByTimeout=13,
+        kCGEventTapDisabledByUserInput=14,
+        kCGEventSourceUserData=20,
+        kCGKeyboardEventKeycode=21,
+        kCGSessionEventTap=1,
+        kCGHeadInsertEventTap=2,
+        kCGEventTapOptionListenOnly=3,
+        CGEventTapEnable=lambda *_: None,
+        CGEventGetIntegerValueField=lambda event, field: event.values[field],
+    )
+    seen = []
+    backend._tokens[object()] = seen.append
+    native = backend._quartz
+    native.CGEventTapEnable = lambda *_: None
+    core = SimpleNamespace(
+        CFMachPortCreateRunLoopSource=lambda *_: "source",
+        CFRunLoopGetCurrent=lambda: "loop",
+        CFRunLoopAddSource=lambda *_: None,
+        kCFRunLoopDefaultMode="default",
+        CFRunLoopRun=lambda: None,
+        CFRunLoopRemoveSource=lambda *_: None,
+        CFMachPortInvalidate=lambda *_: None,
+    )
+
+    def create_tap(location, placement, options, mask, callback, user_info):
+        synthetic = SimpleNamespace(values={20: backend._SYNTHETIC_MARKER, 21: 0})
+        hardware = SimpleNamespace(values={20: 0, 21: 0})
+        callback(None, 10, synthetic, None)
+        callback(None, 10, hardware, None)
+        return object()
+
+    native.CGEventTapCreate = create_tap
+    backend._core_foundation = core
+    backend._ready = threading.Event()
+    backend._stop_requested = threading.Event()
+    backend._tap_thread_main()
+    assert seen == [input_api.KeyEvent("a", input_api.KEY_DOWN)]
+
+
+def test_mac_permission_failure_is_clear_and_does_not_start_tap():
+    backend = input_api.MacOSBackend()
+    backend._quartz = SimpleNamespace(CGPreflightListenEventAccess=lambda: False)
+    with pytest.raises(input_api.InputPermissionError, match="Input Monitoring"):
+        backend._check_permission(backend._quartz, "listen")
+    assert backend._thread is None
+
+
+def test_mac_foreground_pid_excludes_own_window_ids():
+    app = SimpleNamespace(processIdentifier=lambda: 4321)
+    current = SimpleNamespace(processIdentifier=lambda: 1)
+    workspace = SimpleNamespace(frontmostApplication=lambda: app)
+    backend = input_api.MacOSBackend()
+    backend._quartz = SimpleNamespace()
+    backend._core_foundation = SimpleNamespace()
+    backend._appkit = SimpleNamespace(
+        NSWorkspace=SimpleNamespace(sharedWorkspace=lambda: workspace),
+        NSRunningApplication=SimpleNamespace(currentApplication=lambda: current),
+    )
+    assert backend.foreground_target() == 4321
+    assert backend.foreground_target((4321,)) is None
+
+
+def test_windows_hooks_use_tokens_and_map_events(monkeypatch):
+    calls = {}
+
+    def hook(callback):
+        calls["hook"] = callback
+        return "hook-handle"
+
+    keyboard = SimpleNamespace(
+        hook=hook,
+        on_press=lambda callback: "press-handle",
+        unhook=lambda handle: calls.setdefault("unhooked", []).append(handle),
+    )
+    monkeypatch.setitem(sys.modules, "keyboard", keyboard)
+    backend = input_api.WindowsBackend()
+    events = []
+    token = backend.hook(events.append)
+    calls["hook"](SimpleNamespace(name="A", event_type="down", scan_code=30))
+    assert events == [input_api.KeyEvent("a", input_api.KEY_DOWN, 30)]
+    backend.unhook(token)
+    assert calls["unhooked"] == ["hook-handle"]
+
+
+def test_mac_caps_lock_flags_change_emits_press_and_release():
+    backend = input_api.MacOSBackend()
+    events = []
+    backend._tokens[object()] = events.append
+    backend._dispatch_modifier(57, SimpleNamespace())
+    assert events == [
+        input_api.KeyEvent("caps", input_api.KEY_DOWN, None),
+        input_api.KeyEvent("caps", input_api.KEY_UP, None),
+    ]
+
+
+def test_mac_removing_last_hook_clears_modifier_state():
+    backend = input_api.MacOSBackend()
+    token = object()
+    backend._tokens[token] = lambda event: None
+    backend._held_modifiers[56] = "shift"
+    backend.unhook(token)
+    assert not backend._held_modifiers
+    assert not backend._tokens
+
+
+def test_mac_simulation_uses_ansi_a_and_sets_command_flags():
+    posted = []
+    quartz = SimpleNamespace(
+        CGPreflightPostEventAccess=lambda: True,
+        kCGEventSourceStatePrivate=1,
+        kCGEventSourceUserData=2,
+        kCGEventFlagMaskCommand=4,
+        kCGEventFlagMaskShift=1,
+        kCGEventFlagMaskAlternate=2,
+        kCGEventFlagMaskControl=8,
+        kCGEventFlagMaskAlphaShift=16,
+        kCGHIDEventTap=3,
+        CGEventSourceCreate=lambda _: object(),
+        CGEventCreateKeyboardEvent=lambda source, code, down: {"keycode": code, "down": down},
+        CGEventSetIntegerValueField=lambda event, field, value: event.update({"marker": value}),
+        CGEventSetFlags=lambda event, value: event.update({"flags": value}),
+        CGEventPost=lambda tap, event: posted.append(event.copy()),
+    )
+    backend = input_api.MacOSBackend()
+    backend._quartz = quartz
+    backend._core_foundation = SimpleNamespace()
+    backend._appkit = SimpleNamespace()
+    backend.simulate_keys("a", ["command"])
+    assert [event["keycode"] for event in posted] == [55, 0, 0, 55]
+    assert posted[1]["flags"] == quartz.kCGEventFlagMaskCommand
+    assert all(event["marker"] == backend._SYNTHETIC_MARKER for event in posted)
+    assert backend.is_simulating is False
+    posted.clear()
+    backend.simulate_keys("rshift", ["shift"])
+    assert [event["keycode"] for event in posted] == [56, 60, 60, 56]
+    assert [event["flags"] for event in posted] == [1, 1, 1, 0]
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires macOS Quartz PyObjC")
+def test_real_quartz_event_wrapper_api_roundtrip_without_posting():
+    import Quartz
+
+    event = Quartz.CGEventCreateKeyboardEvent(None, 0, True)
+    assert event is not None
+    marker = 0x534B4244
+    Quartz.CGEventSetIntegerValueField(event, Quartz.kCGEventSourceUserData, marker)
+    assert Quartz.CGEventGetIntegerValueField(event, Quartz.kCGEventSourceUserData) == marker

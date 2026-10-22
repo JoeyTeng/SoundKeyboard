@@ -1,16 +1,13 @@
-import argparse
 import copy
-import ctypes
-import ctypes.wintypes
 import os
 import sys
 import tempfile
 import threading
-import time
+from contextlib import nullcontext
 
-import keyboard
-from PyQt5.QtCore import QObject, Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QFont, QIcon
+import pygame
+from PyQt5.QtCore import QObject, Qt, QTimer, QUrl, pyqtSignal
+from PyQt5.QtGui import QDesktopServices, QFont, QIcon
 from PyQt5.QtWidgets import (
     QAbstractItemView,
     QAction,
@@ -35,336 +32,7 @@ from PyQt5.QtWidgets import (
 )
 
 from audio_engine import AudioEngine
-
-# ===================== Win32 常量与结构 =====================
-user32 = ctypes.windll.user32
-kernel32 = ctypes.windll.kernel32
-
-INPUT_KEYBOARD = 1
-KEYEVENTF_KEYUP = 0x0002
-KEYEVENTF_EXTENDEDKEY = 0x0001
-
-GWL_EXSTYLE = -20
-WS_EX_NOACTIVATE = 0x08000000
-WS_EX_TOOLWINDOW = 0x00000080
-WS_EX_TOPMOST = 0x00000008
-
-SW_SHOWNOACTIVATE = 4
-SWP_NOACTIVATE = 0x0010
-SWP_NOMOVE = 0x0002
-SWP_NOSIZE = 0x0001
-HWND_TOPMOST = -1
-
-
-class KEYBDINPUT(ctypes.Structure):
-    _fields_ = [
-        ("wVk", ctypes.c_ushort),
-        ("wScan", ctypes.c_ushort),
-        ("dwFlags", ctypes.c_ulong),
-        ("time", ctypes.c_ulong),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
-    ]
-
-
-class HARDWAREINPUT(ctypes.Structure):
-    _fields_ = [
-        ("uMsg", ctypes.c_ulong),
-        ("wParamL", ctypes.c_ushort),
-        ("wParamH", ctypes.c_ushort),
-    ]
-
-
-class MOUSEINPUT(ctypes.Structure):
-    _fields_ = [
-        ("dx", ctypes.c_long),
-        ("dy", ctypes.c_long),
-        ("mouseData", ctypes.c_ulong),
-        ("dwFlags", ctypes.c_ulong),
-        ("time", ctypes.c_ulong),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
-    ]
-
-
-class INPUT_UNION(ctypes.Union):
-    _fields_ = [
-        ("mi", MOUSEINPUT),
-        ("ki", KEYBDINPUT),
-        ("hi", HARDWAREINPUT),
-    ]
-
-
-class INPUT(ctypes.Structure):
-    _fields_ = [
-        ("type", ctypes.c_ulong),
-        ("union", INPUT_UNION),
-    ]
-
-
-VK_MAP = {
-    "space": 0x20,
-    "enter": 0x0D,
-    "tab": 0x09,
-    "back": 0x08,
-    "caps": 0x14,
-    "shift": 0x10,
-    "rshift": 0xA1,
-    "ctrl": 0x11,
-    "rctrl": 0xA3,
-    "alt": 0x12,
-    "ralt": 0xA5,
-    "win": 0x5B,
-    "rwin": 0x5C,
-    "menu": 0x5D,
-    "esc": 0x1B,
-    "ins": 0x2D,
-    "del": 0x2E,
-    "home": 0x24,
-    "end": 0x23,
-    "pageup": 0x21,
-    "pagedown": 0x22,
-    "up": 0x26,
-    "down": 0x28,
-    "left": 0x25,
-    "right": 0x27,
-    "f1": 0x70,
-    "f2": 0x71,
-    "f3": 0x72,
-    "f4": 0x73,
-    "f5": 0x74,
-    "f6": 0x75,
-    "f7": 0x76,
-    "f8": 0x77,
-    "f9": 0x78,
-    "f10": 0x79,
-    "f11": 0x7A,
-    "f12": 0x7B,
-    "a": 0x41,
-    "b": 0x42,
-    "c": 0x43,
-    "d": 0x44,
-    "e": 0x45,
-    "f": 0x46,
-    "g": 0x47,
-    "h": 0x48,
-    "i": 0x49,
-    "j": 0x4A,
-    "k": 0x4B,
-    "l": 0x4C,
-    "m": 0x4D,
-    "n": 0x4E,
-    "o": 0x4F,
-    "p": 0x50,
-    "q": 0x51,
-    "r": 0x52,
-    "s": 0x53,
-    "t": 0x54,
-    "u": 0x55,
-    "v": 0x56,
-    "w": 0x57,
-    "x": 0x58,
-    "y": 0x59,
-    "z": 0x5A,
-    "0": 0x30,
-    "1": 0x31,
-    "2": 0x32,
-    "3": 0x33,
-    "4": 0x34,
-    "5": 0x35,
-    "6": 0x36,
-    "7": 0x37,
-    "8": 0x38,
-    "9": 0x39,
-    "-": 0xBD,
-    "=": 0xBB,
-    "[": 0xDB,
-    "]": 0xDD,
-    "\\": 0xDC,
-    ";": 0xBA,
-    "'": 0xDE,
-    ",": 0xBC,
-    ".": 0xBE,
-    "/": 0xBF,
-    "`": 0xC0,
-}
-
-# 需要 EXTENDEDKEY 标志的键
-EXTENDED_KEYS = {
-    0xA1,
-    0xA3,
-    0xA5,  # rshift, rctrl, ralt
-    0x5B,
-    0x5C,
-    0x5D,  # win, rwin, menu
-    0x2D,
-    0x2E,  # ins, del
-    0x24,
-    0x23,
-    0x21,
-    0x22,  # home, end, pageup, pagedown
-    0x26,
-    0x28,
-    0x25,
-    0x27,  # arrows
-}
-
-# ★ 全局标志
-_is_simulating = False
-
-
-def _make_key_input(vk, flags=0):
-    """构造一个键盘 INPUT 结构"""
-    inp = INPUT()
-    inp.type = INPUT_KEYBOARD
-    inp.union.ki.wVk = vk
-    inp.union.ki.wScan = user32.MapVirtualKeyW(vk, 0)
-    inp.union.ki.dwFlags = flags
-    if vk in EXTENDED_KEYS:
-        inp.union.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY
-    inp.union.ki.time = 0
-    inp.union.ki.dwExtraInfo = ctypes.pointer(ctypes.c_ulong(0))
-    return inp
-
-
-def do_send_input(inputs):
-    """发送一组 INPUT"""
-    n = len(inputs)
-    arr = (INPUT * n)(*inputs)
-    user32.SendInput(n, arr, ctypes.sizeof(INPUT))
-
-
-def simulate_keys(key, modifier_keys=None, target_hwnd=None):
-    """
-    在子线程中：恢复目标窗口焦点 → 发送按键 → 完成
-    """
-    global _is_simulating
-
-    vk = VK_MAP.get(key)
-    if vk is None:
-        return
-
-    mod_vks = []
-    if modifier_keys:
-        for mk in modifier_keys:
-            mvk = VK_MAP.get(mk)
-            if mvk:
-                mod_vks.append(mvk)
-
-    try:
-        _is_simulating = True
-        time.sleep(0.01)
-
-        # ★ 恢复目标窗口到前台
-        if target_hwnd and user32.IsWindow(target_hwnd):
-            user32.SetForegroundWindow(target_hwnd)
-            time.sleep(0.05)
-
-        # 构建输入序列
-        inputs = []
-        # 按下修饰键
-        for mvk in mod_vks:
-            inputs.append(_make_key_input(mvk, 0))
-        # 按下目标键
-        inputs.append(_make_key_input(vk, 0))
-        # 释放目标键
-        inputs.append(_make_key_input(vk, KEYEVENTF_KEYUP))
-        # 释放修饰键（逆序）
-        for mvk in reversed(mod_vks):
-            inputs.append(_make_key_input(mvk, KEYEVENTF_KEYUP))
-
-        do_send_input(inputs)
-
-    except Exception as e:
-        print(f"模拟按键失败: {e}")
-    finally:
-        time.sleep(0.02)
-        _is_simulating = False
-
-
-# ===================== 键名规范化 =====================
-KEY_NAME_MAP = {}
-SCAN_CODE_MAP = {
-    42: "shift",
-    54: "rshift",
-    29: "ctrl",
-    285: "rctrl",
-    56: "alt",
-    312: "ralt",
-    91: "win",
-    92: "rwin",
-    347: "win",
-    348: "rwin",
-    58: "caps",
-    57: "space",
-    28: "enter",
-    1: "esc",
-    15: "tab",
-    14: "back",
-    339: "del",
-    83: "del",
-    338: "ins",
-    82: "ins",
-}
-
-
-def _build_key_map():
-    pairs = [
-        (["spacebar", "space"], "space"),
-        (["return", "enter", "\r", "\n"], "enter"),
-        (["escape", "esc"], "esc"),
-        (["left shift", "lshift", "shift"], "shift"),
-        (["right shift", "rshift"], "rshift"),
-        (["left ctrl", "lctrl", "ctrl", "left control", "control"], "ctrl"),
-        (["right ctrl", "rctrl", "right control"], "rctrl"),
-        (["left alt", "lalt", "alt"], "alt"),
-        (["right alt", "ralt", "altgr"], "ralt"),
-        (["left windows", "left win", "lwin", "windows", "win", "left meta", "cmd"], "win"),
-        (["right windows", "right win", "rwin", "right meta"], "rwin"),
-        (["caps lock", "capital", "caps", "capslock"], "caps"),
-        (["backspace", "back"], "back"),
-        (["delete", "del"], "del"),
-        (["insert", "ins"], "ins"),
-        (["tab"], "tab"),
-        (["menu", "apps", "context menu"], "menu"),
-    ]
-    for names, canonical in pairs:
-        for n in names:
-            KEY_NAME_MAP[n] = canonical
-    for k, v in {
-        "!": "1",
-        "@": "2",
-        "#": "3",
-        "$": "4",
-        "%": "5",
-        "^": "6",
-        "&": "7",
-        "*": "8",
-        "(": "9",
-        ")": "0",
-        "_": "-",
-        "+": "=",
-        "{": "[",
-        "}": "]",
-        "|": "\\",
-        ":": ";",
-        '"': "'",
-        "<": ",",
-        ">": ".",
-        "?": "/",
-        "~": "`",
-    }.items():
-        KEY_NAME_MAP[k] = v
-
-
-_build_key_map()
-
-
-def normalize_key(name, scan_code=None):
-    if scan_code and scan_code in SCAN_CODE_MAP:
-        return SCAN_CODE_MAP[scan_code]
-    if not name:
-        return ""
-    name = str(name).strip().lower()
-    return KEY_NAME_MAP.get(name, name)
+from platform_input import KEY_DOWN, KEY_UP, create_backend, normalize_key
 
 
 def get_resource_path(relative_path):
@@ -377,10 +45,13 @@ def get_resource_path(relative_path):
 class KeySignal(QObject):
     pressed = pyqtSignal(str)
     released = pyqtSignal(str)
+    error = pyqtSignal(str)
 
 
 # ===================== 按键捕获对话框 =====================
 class KeyCaptureDialog(QDialog):
+    captured = pyqtSignal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("捕获按键")
@@ -388,6 +59,8 @@ class KeyCaptureDialog(QDialog):
         self.setFixedSize(320, 150)
         self.captured_key = ""
         self._hook_id = None
+        self.backend = parent.parent_vkb.backend
+        self.captured.connect(self._set_key)
         layout = QVBoxLayout(self)
         self.label = QLabel("请按下要绑定的按键...")
         self.label.setAlignment(Qt.AlignCenter)
@@ -416,23 +89,54 @@ class KeyCaptureDialog(QDialog):
         """)
 
     def keyPressEvent(self, e):
-        pass
+        # Local capture remains usable before global input access is granted.
+        keys = {
+            Qt.Key_Space: "space",
+            Qt.Key_Return: "enter",
+            Qt.Key_Enter: "enter",
+            Qt.Key_Escape: "esc",
+            Qt.Key_Backspace: "back",
+            Qt.Key_Delete: "del",
+            Qt.Key_Shift: "shift",
+            Qt.Key_Control: "ctrl",
+            Qt.Key_Alt: "alt",
+            Qt.Key_Meta: "win",
+            Qt.Key_CapsLock: "caps",
+            Qt.Key_Tab: "tab",
+            Qt.Key_Left: "left",
+            Qt.Key_Right: "right",
+            Qt.Key_Up: "up",
+            Qt.Key_Down: "down",
+            Qt.Key_Home: "home",
+            Qt.Key_End: "end",
+            Qt.Key_PageUp: "pageup",
+            Qt.Key_PageDown: "pagedown",
+        }
+        if self._hook_id is None:
+            self._set_key(keys.get(e.key(), normalize_key(e.text())))
+        e.accept()
 
     def keyReleaseEvent(self, e):
         pass
 
     def showEvent(self, e):
         super().showEvent(e)
-        self._hook_id = keyboard.on_press(self._on_key)
+        try:
+            self._hook_id = self.backend.on_press(self._on_key)
+        except Exception:
+            self.label.setText("Global input unavailable; press a key in this window.")
 
     def hideEvent(self, e):
-        if self._hook_id:
-            keyboard.unhook(self._hook_id)
+        if self._hook_id is not None:
+            self.backend.unhook(self._hook_id)
             self._hook_id = None
         super().hideEvent(e)
 
     def _on_key(self, e):
         k = normalize_key(e.name, getattr(e, "scan_code", None))
+        self.captured.emit(k)
+
+    def _set_key(self, k):
         if k:
             self.captured_key = k
             self.lbl_key.setText(k.upper())
@@ -795,7 +499,7 @@ class CustomSettingsUI(QWidget):
     def open_rule_dir(self):
         d = self.audio.pack_dir
         if d and os.path.exists(d):
-            os.startfile(d)
+            QDesktopServices.openUrl(QUrl.fromLocalFile(d))
         else:
             QMessageBox.information(self, "提示", "尚未选择音效包，不存在规则集目录。")
 
@@ -820,8 +524,15 @@ class VirtualKeyboardApp(QWidget):
         self.setWindowIcon(QIcon(self.icon_path))
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        if sys.platform == "darwin":
+            # Keep the keyboard available while typing in another application.
+            self.setAttribute(Qt.WA_MacAlwaysShowToolWindow)
 
-        self.audio = AudioEngine(pack_dir=pack_dir)
+        self.backend = create_backend()
+        self._hook_id = None
+        self._input_error_dialog = None
+        self.audio = AudioEngine(pack_dir)
         self.theme_color = "#FF8C00"
         self.base_size = 40
         self.buttons = {}
@@ -832,12 +543,12 @@ class VirtualKeyboardApp(QWidget):
         self.key_sig = KeySignal()
         self.key_sig.pressed.connect(self.on_key_pressed)
         self.key_sig.released.connect(self.on_key_released)
+        self.key_sig.error.connect(self._show_input_error)
         self._drag_pos = None
 
         self._cleanup_timer = QTimer(self)
         self._cleanup_timer.timeout.connect(self._cleanup_stuck)
-        if enable_global_input:
-            self._cleanup_timer.start(1500)
+        self._cleanup_timer.start(1500)
 
         self._fg_timer = QTimer(self)
         self._fg_timer.timeout.connect(self._track_fg)
@@ -849,19 +560,22 @@ class VirtualKeyboardApp(QWidget):
         self.settings_dialog = CustomSettingsUI(self)
         if enable_global_input:
             self.start_keyboard_hook()
+        QApplication.instance().aboutToQuit.connect(self.shutdown)
 
     def _track_fg(self):
-        """★ 记住最后一个非自身的前台窗口"""
-        try:
-            hwnd = user32.GetForegroundWindow()
-            my = int(self.winId())
-            sd = 0
-            if hasattr(self, "settings_dialog") and self.settings_dialog.isVisible():
-                sd = int(self.settings_dialog.winId())
-            if hwnd and hwnd != my and hwnd != sd:
-                self._last_fg_hwnd = hwnd
-        except Exception:
-            pass
+        own_windows = [int(self.winId())]
+        if hasattr(self, "settings_dialog"):
+            own_windows.append(int(self.settings_dialog.winId()))
+        target = self.backend.foreground_target(own_windows)
+        if target:
+            self._last_fg_hwnd = target
+
+    def _show_input_error(self, message):
+        if self._input_error_dialog is not None and self._input_error_dialog.isVisible():
+            return
+        dialog = QMessageBox(QMessageBox.Warning, "Keyboard access", message, QMessageBox.Ok, self)
+        self._input_error_dialog = dialog
+        dialog.open()
 
     def init_tray(self):
         self.tray_icon = QSystemTrayIcon(QIcon(self.icon_path), self)
@@ -876,8 +590,11 @@ class VirtualKeyboardApp(QWidget):
         a2.triggered.connect(self.open_settings)
         a3 = QAction("❌ 退出", self)
         a3.triggered.connect(self.quit_app)
+        retry = QAction("Retry keyboard access", self)
+        retry.triggered.connect(self.start_keyboard_hook)
         tm.addAction(a1)
         tm.addAction(a2)
+        tm.addAction(retry)
         tm.addSeparator()
         tm.addAction(a3)
         self.tray_icon.setContextMenu(tm)
@@ -908,7 +625,10 @@ class VirtualKeyboardApp(QWidget):
 
         # ★ 组合键锁按钮
         self.mod_btns = {}
-        for mn, ml in [("ctrl", "Ctrl"), ("shift", "Shift"), ("alt", "Alt")]:
+        modifiers = [("ctrl", "Ctrl"), ("shift", "Shift"), ("alt", "Alt")]
+        if sys.platform == "darwin":
+            modifiers = [("ctrl", "Ctrl"), ("shift", "Shift"), ("alt", "Opt"), ("win", "Cmd")]
+        for mn, ml in modifiers:
             b = QPushButton(ml)
             b.setFixedSize(42, 18)
             b.setFont(QFont("Arial", 7, QFont.Bold))
@@ -1021,6 +741,13 @@ class VirtualKeyboardApp(QWidget):
             ],
         ]
 
+        if sys.platform == "darwin":
+            labels = {"win": "⌘ CMD", "alt": "⌥ OPT", "ctrl": "⌃ CTRL", "del": "⌦"}
+            self.rows_def = [
+                [(key, labels.get(key, label), width) for key, label, width in row]
+                for row in self.rows_def
+            ]
+
         self.row_layouts = []
         for row in self.rows_def:
             hl = QHBoxLayout()
@@ -1080,11 +807,13 @@ class VirtualKeyboardApp(QWidget):
         target = self._last_fg_hwnd
 
         if target:
-            threading.Thread(target=simulate_keys, args=(key, mods, target), daemon=True).start()
+            threading.Thread(
+                target=self._simulate_keys, args=(key, mods, target), daemon=True
+            ).start()
 
         # 非修饰键时清除组合键锁
         if (
-            key not in ("ctrl", "rctrl", "shift", "rshift", "alt", "ralt", "caps")
+            key not in ("ctrl", "rctrl", "shift", "rshift", "alt", "ralt", "win", "rwin", "caps")
             and self.locked_modifiers
         ):
             self.locked_modifiers.clear()
@@ -1173,9 +902,20 @@ class VirtualKeyboardApp(QWidget):
     def toggle_vis(self):
         self.hide() if self.isVisible() else self.show()
 
+    def shutdown(self):
+        self._cleanup_timer.stop()
+        self._fg_timer.stop()
+        self.backend.unhook_all()
+        pygame.mixer.quit()
+
     def quit_app(self):
-        keyboard.unhook_all()
         QApplication.quit()
+
+    def _simulate_keys(self, key, mods, target):
+        try:
+            self.backend.simulate_keys(key, mods, target)
+        except Exception as error:
+            self.key_sig.error.emit(str(error))
 
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
@@ -1189,25 +929,24 @@ class VirtualKeyboardApp(QWidget):
         self._drag_pos = None
 
     def start_keyboard_hook(self):
+        if self._hook_id is not None:
+            return
+
         def on_hook(e):
-            global _is_simulating
-            if _is_simulating:
+            if self.backend.is_simulating:
                 return
-            if hasattr(self, "settings_dialog") and self.settings_dialog.is_editing:
-                if self.settings_dialog.isActiveWindow():
-                    return
             k = normalize_key(e.name, getattr(e, "scan_code", None))
             if not k:
                 return
-            if e.event_type == keyboard.KEY_DOWN:
-                if k not in self.pressed_keys:
-                    self.pressed_keys.add(k)
-                    self.key_sig.pressed.emit(k)
-            elif e.event_type == keyboard.KEY_UP:
-                self.pressed_keys.discard(k)
+            if e.event_type == KEY_DOWN:
+                self.key_sig.pressed.emit(k)
+            elif e.event_type == KEY_UP:
                 self.key_sig.released.emit(k)
 
-        keyboard.hook(on_hook)
+        try:
+            self._hook_id = self.backend.hook(on_hook)
+        except Exception as error:
+            self.key_sig.error.emit(str(error))
 
     def _cleanup_stuck(self):
         for k, b in self.buttons.items():
@@ -1216,6 +955,11 @@ class VirtualKeyboardApp(QWidget):
                 self._style_btn(b, False)
 
     def on_key_pressed(self, key):
+        if self.settings_dialog.is_editing and self.settings_dialog.isActiveWindow():
+            return
+        if key in self.pressed_keys:
+            return
+        self.pressed_keys.add(key)
         if key in self.buttons:
             self.buttons[key].setProperty("is_pressed", True)
             self._style_btn(self.buttons[key], True)
@@ -1230,31 +974,33 @@ class VirtualKeyboardApp(QWidget):
         self.pressed_keys.discard(key)
 
 
-if __name__ == "__main__":
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--smoke-test", action="store_true")
+def run():
+    """Run normally, or perform a silent startup check without global input access."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="SoundKeyboard desktop application")
+    parser.add_argument("--smoke-test", action="store_true", help="Check startup silently and exit")
     args = parser.parse_args()
-    if args.smoke_test and sys.platform != "win32":
-        parser.error("--smoke-test is available on Windows only")
     if args.smoke_test:
         os.environ["SDL_AUDIODRIVER"] = "dummy"
-
-    app = QApplication([sys.argv[0]])
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    app = QApplication(sys.argv)
     QApplication.setQuitOnLastWindowClosed(False)
-    if args.smoke_test:
-        with tempfile.TemporaryDirectory(prefix="soundkeyboard-smoke-") as pack_dir:
-            window = VirtualKeyboardApp(enable_global_input=False, pack_dir=pack_dir)
-            window.show()
+    context = (
+        tempfile.TemporaryDirectory(prefix="soundkeyboard-smoke-")
+        if args.smoke_test
+        else nullcontext(None)
+    )
+    with context as pack_dir:
+        window = VirtualKeyboardApp(enable_global_input=not args.smoke_test, pack_dir=pack_dir)
+        if args.smoke_test:
+            window.backend.prepare()
+        window.show()
+        if args.smoke_test:
             QTimer.singleShot(200, app.quit)
-            result = app.exec_()
-            window.tray_icon.hide()
-            window.close()
-            import pygame
+        return app.exec_()
 
-            pygame.mixer.quit()
-            sys.exit(result)
-    window = VirtualKeyboardApp()
-    window.show()
-    sys.exit(app.exec_())
+
+if __name__ == "__main__":
+    sys.exit(run())

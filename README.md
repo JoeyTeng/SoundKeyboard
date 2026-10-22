@@ -26,56 +26,74 @@
 
 ```text
 ├── main.py                       # 主程序入口
-├── audio_engine.py               # Platform-independent audio engine
-├── tests/                         # Automated tests
-├── .github/workflows/ci.yml      # CI workflow
+├── audio_engine.py               # 音频加载与变调
 ├── build.spec                    # PyInstaller 打包配置
-├── pyproject.toml                # Project metadata and dependency groups
-├── uv.lock                       # Locked dependency versions
-├── requirements.txt              # Exported compatibility dependency list
+├── pyproject.toml                # Python project and tooling configuration
+├── uv.lock                       # Locked Python dependencies
 ├── rule.example.json             # 示例规则映射配置文件
-├── run.bat                       # Windows 快速启动脚本
+├── run.command                   # macOS quick launch script
+├── run.bat                       # Windows quick launch script
 ├── README.md                     # README 文件
 └── LICENSE                       # 许可证文件
 ```
 
-> **注意**：程序首次运行或保存配置时，会自动生成默认音效包文件夹以保存你的自定义设置。源码运行时，该文件夹位于 `audio_engine.py` 旁；打包运行时，它位于可执行文件旁。默认音效包为空；导入或添加音频后才能播放音效。
+> **注意**：默认音效包初始为空，不包含音频文件。导入音效包或添加音频并配置规则后，才会播放按键音效。
 
 ## 环境要求
 
-- **Python**: 3.10–3.12 (for source development)
-- **Runtime support**: The native keyboard input path uses Win32 and the desktop runtime is currently Windows-only. macOS CI checks the platform-independent audio engine and validates app packaging; starting the native app and global keyboard input on macOS are not supported yet.
+- **Windows**: Windows 10 or later is recommended.
+- **macOS**: A recent macOS version. Global keyboard capture and input control require user-granted **Input Monitoring** and **Accessibility** permissions.
+- **Python (source runs)**: Python 3.10–3.12, managed with [uv](https://docs.astral.sh/uv/). The project defaults to Python 3.12.
+
+On macOS, open **System Settings → Privacy & Security** and grant SoundKeyboard access under **Input Monitoring** and **Accessibility**. Depending on how you launch it, the listed item may be Terminal (or another terminal host) for a source run, or SoundKeyboard for the packaged app. After changing permissions, quit and reopen the launcher or app, then retry. macOS controls these permissions; SoundKeyboard does not grant them silently and does not require `sudo`.
+
+See Apple's guides for [Input Monitoring](https://support.apple.com/en-ie/guide/mac-help/mchl4cedafb6/27/mac/27) and [Accessibility access](https://support.apple.com/en-ie/guide/mac-help/mh43185/27/mac/27).
+
+Password and other secure input fields may suppress global keystroke monitoring. macOS and applications also reserve some system shortcuts, so those shortcuts may not be captured or remapped reliably. Physical key positions use ANSI keyboard mapping. Option and Command are shown using the canonical `alt` and `win` key names for compatibility with existing rules.
 
 ## 快速开始
 
-### 运行发布版本（EXE）
-下载最新版本的 `.exe` 和音效包压缩包，解压音效包后把文件夹和 `.exe` 放到同目录下双击运行主程序即可。
+### Run a release build
+
+On Windows, download and run the `.exe`. On macOS, download and open the `.app` archive. The macOS app is not Developer ID signed or notarized, so macOS may require you to approve opening it in Privacy & Security.
+
+The default pack is created automatically when needed. Source runs store it in the `default_pack` directory beside `main.py`, regardless of the current working directory. Packaged macOS app data is stored at `~/Library/Application Support/SoundKeyboard/default_pack`; on Windows, it remains next to the executable. You can import another sound pack from the settings panel.
 
 ### 从源码运行
 
-**方法一**：
-On Windows, run [`run.bat`](run.bat) from the project directory. It installs the locked dependencies with `uv` and starts the application.
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), which manages the project's Python 3.12 environment, then use the launcher for your platform:
 
-**方法二（手动纯命令行操作）**：
+- macOS: double-click [`run.command`](run.command). If macOS blocks the script, open Terminal in the project directory and run `./run.command`.
+- Windows: double-click [`run.bat`](run.bat).
 
-1. Clone the project and enter its directory:
+For a manual setup from a terminal:
+
+1. Clone or download the project:
    
    ```bash
    git clone https://github.com/JoeyTeng/SoundKeyboard.git
    cd SoundKeyboard
    ```
    
-2. Install the locked dependencies (install [uv](https://docs.astral.sh/uv/) first):
+2. Install the locked runtime and development dependencies:
 
    ```bash
-   uv sync --locked
+   uv sync --locked --group dev
    ```
 
-3. Start the application on Windows:
+3. Run the application:
 
    ```bash
    uv run --locked main.py
    ```
+
+The smoke check briefly shows the GUI, uses a temporary data directory and a silent audio driver, and exits automatically without capturing global input:
+
+```bash
+uv run --locked main.py --smoke-test
+```
+
+On macOS, complete the permissions setup above before expecting global keyboard features to work.
 
 ## 音效包与规则配置指南
 
@@ -85,31 +103,24 @@ On Windows, run [`run.bat`](run.bat) from the project directory. It installs the
 - 点击 **保存** 后，程序会自动生成或更新当前挂载的音效包的 `rule.json`。
 - 点击设置面板的 **导入音效包** 选择其他文件夹，即可无缝切换不同的一套配置及音效。
 
-## 构建可执行文件
+## Lint, format, test, and build
 
-Install the build dependency group and create the Windows executable or macOS packaging artifact:
+Run the same checks used by CI:
+
+```bash
+uv run --locked ruff check .
+uv run --locked ruff format --check .
+uv run --locked pytest
+```
+
+To build, install only the locked build dependencies, then package for the current operating system:
 
 ```bash
 uv sync --locked --no-default-groups --group build
 uv run --locked --no-sync pyinstaller --clean --noconfirm build.spec
 ```
 
-The build output is written to `dist/`. The macOS `.app` produced by this command is currently packaging validation only; native macOS startup and keyboard input are planned for a separate follow-up change. In a frozen build, the default sound pack is stored next to the executable.
-
-## Development and CI
-
-The project targets Python 3.10–3.12. `pyproject.toml` defines project dependencies and development tools, while `uv.lock` records the exact resolved versions. `requirements.txt` is an exported compatibility artifact; use `uv` and the lockfile for project development.
-
-Install development dependencies and run the checks locally:
-
-```bash
-uv sync --locked --group dev
-uv run --locked ruff check .
-uv run --locked ruff format --check .
-uv run --locked pytest
-```
-
-CI runs lint checks and the test suite on Windows and macOS with Python 3.10 and 3.12. It builds on both operating systems with Python 3.12, runs a Windows executable smoke test, and packages the macOS `.app`. The stable `CI required` status gates lint, all test matrix jobs, and both builds. The Windows-only `--smoke-test` mode uses SDL's dummy audio driver and a temporary sound pack, installs no global keyboard hook, and exits after 200 ms. The macOS checks exercise the extracted platform-independent `audio_engine.py` and app packaging; they do not establish native macOS application startup or global keyboard input support.
+The build output is written under `dist/`. The stable CI workflow required for changes runs lint, formatting, and tests on Python 3.10 and 3.12 on Windows and macOS, and builds the Windows `.exe` plus a macOS `.app` archive. The macOS workflow also runs a packaged silent startup smoke check. The macOS app is not Developer ID signed or notarized. CI does not validate physical keyboard behavior, audio playback, or macOS TCC permission setup; those still require manual checks on the target machine.
 
 ## 依赖库
 
@@ -118,7 +129,7 @@ CI runs lint checks and the test suite on Windows and macOS with Python 3.10 and
 | PyQt5 | GUI 桌面界面与设置面板的构建交互 |
 | pygame | 高性能的音频混音器与按键音效播放引擎 |
 | numpy | 用于底层音频数据的矩阵处理、变调计算及倒放生成 |
-| keyboard | 全局键盘事件的底层捕获与注入回调 |
+| keyboard / Quartz and AppKit | Platform-specific global keyboard capture and input handling |
 
 ## 声明与开源许可证
 

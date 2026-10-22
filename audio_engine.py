@@ -12,7 +12,9 @@ from PyQt5.QtCore import QTimer
 
 
 def get_default_pack_path():
-    """Return the pack directory beside the source file or frozen executable."""
+    """Return the writable default pack location for this installation."""
+    if sys.platform == "darwin" and getattr(sys, "frozen", False):
+        return os.path.expanduser("~/Library/Application Support/SoundKeyboard/default_pack")
     if getattr(sys, "frozen", False):
         app_dir = os.path.dirname(os.path.abspath(sys.executable))
     else:

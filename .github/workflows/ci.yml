@@ -82,6 +82,9 @@ jobs:
         run: |
           $process = Start-Process -FilePath "dist/SoundKeyboard.exe" -ArgumentList "--smoke-test" -Wait -PassThru
           exit $process.ExitCode
+      - name: Smoke test macOS app
+        if: runner.os == 'macOS'
+        run: dist/SoundKeyboard.app/Contents/MacOS/SoundKeyboard --smoke-test
       - name: Package macOS app
         if: runner.os == 'macOS'
         run: ditto -c -k --sequesterRsrc --keepParent dist/SoundKeyboard.app dist/SoundKeyboard-macos.zip

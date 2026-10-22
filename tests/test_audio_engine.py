@@ -89,6 +89,7 @@ def test_invalid_utf8_rules_do_not_prevent_startup(tmp_path):
 
 
 def test_frozen_default_pack_is_next_to_executable(monkeypatch, tmp_path):
+    monkeypatch.setattr("audio_engine.sys.platform", "win32")
     monkeypatch.setattr("audio_engine.sys.frozen", True, raising=False)
     monkeypatch.setattr("audio_engine.sys.executable", str(tmp_path / "SoundKeyboard.exe"))
 
