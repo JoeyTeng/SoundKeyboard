@@ -939,7 +939,9 @@ class VirtualKeyboardApp(QWidget):
             return
 
         def on_hook(e):
-            if self.backend.is_simulating:
+            # Quartz filters our synthetic events by source marker, so hardware
+            # releases must still reach the UI while virtual input is posted.
+            if sys.platform != "darwin" and self.backend.is_simulating:
                 return
             k = normalize_key(e.name, getattr(e, "scan_code", None))
             if not k:

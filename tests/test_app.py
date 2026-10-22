@@ -86,7 +86,7 @@ def test_every_virtual_key_has_a_native_posting_mapping(app, monkeypatch, tmp_pa
         app.processEvents()
 
 
-def test_keyboard_repeat_and_simulated_input(window):
+def test_keyboard_repeat_and_release(window):
     window.audio.play_key = Mock()
     window.audio.release_key = Mock()
     window.start_keyboard_hook()
@@ -101,10 +101,39 @@ def test_keyboard_repeat_and_simulated_input(window):
     callback(event)
     window.audio.release_key.assert_called_once_with("a")
     assert not window.buttons["a"].property("is_pressed")
+
+
+@pytest.mark.parametrize(("platform", "ignored"), [("darwin", False), ("win32", True)])
+def test_simulation_filter_respects_backend_event_origin_handling(
+    window, monkeypatch, platform, ignored
+):
+    monkeypatch.setattr(main.sys, "platform", platform)
+    window.audio.play_key = Mock()
+    window.audio.release_key = Mock()
+    window.start_keyboard_hook()
+    callback = window.backend.callbacks["hook"]
     window.backend.is_simulating = True
-    event.event_type = "down"
-    callback(event)
-    window.audio.play_key.assert_called_once()
+    callback(SimpleNamespace(name="a", scan_code=None, event_type="down"))
+    callback(SimpleNamespace(name="a", scan_code=None, event_type="up"))
+    assert window.audio.play_key.call_count == (0 if ignored else 1)
+    assert window.audio.release_key.call_count == (0 if ignored else 1)
+
+
+def test_mac_hardware_release_is_not_lost_during_virtual_input(window, monkeypatch):
+    monkeypatch.setattr(main.sys, "platform", "darwin")
+    window.audio.play_key = Mock()
+    window.audio.release_key = Mock()
+    window.start_keyboard_hook()
+    callback = window.backend.callbacks["hook"]
+    callback(SimpleNamespace(name="space", scan_code=None, event_type="down"))
+    window.backend.is_simulating = True
+    callback(SimpleNamespace(name="space", scan_code=None, event_type="up"))
+    assert "space" not in window.pressed_keys
+    assert not window.buttons["space"].property("is_pressed")
+    window.audio.release_key.assert_called_once_with("space")
+    window.backend.is_simulating = False
+    callback(SimpleNamespace(name="space", scan_code=None, event_type="down"))
+    assert window.audio.play_key.call_count == 2
 
 
 def test_permission_failure_can_retry(window):
