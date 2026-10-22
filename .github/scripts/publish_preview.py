@@ -293,6 +293,9 @@ def publish(asset_directory: Path, env: dict[str, str] | None = None) -> str:
                 raise PublishError("Could not create preview release draft.")
             _upload(tag, files)
 
+        if _current_main_sha() != sha:
+            return f"Main advanced during asset upload; left preview release {tag} unpublished."
+
         publish_result = _run_gh(
             [
                 "release",

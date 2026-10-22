@@ -131,6 +131,37 @@ def test_upload_failure_does_not_publish_draft(tmp_path, monkeypatch):
     assert [call[:2] for call in calls] == [["release", "create"], ["release", "upload"]]
 
 
+def test_main_advance_during_upload_leaves_draft_unpublished(tmp_path, monkeypatch):
+    assets = make_assets(tmp_path / "release-assets")
+    tag = f"preview-{SHA}"
+    main_reads = 0
+
+    def api(endpoint: str):
+        nonlocal main_reads
+        if endpoint.endswith("/commits/main"):
+            main_reads += 1
+            return {"sha": SHA if main_reads == 1 else "b" * 40}
+        assert endpoint.endswith(f"/releases/tags/{tag}") or endpoint.endswith(
+            f"/git/ref/tags/{tag}"
+        )
+        return None
+
+    calls: list[list[str]] = []
+
+    def gh(args: list[str], **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(["gh", *args], 0, "", "")
+
+    monkeypatch.setattr(publisher, "_api_get", api)
+    monkeypatch.setattr(publisher, "_api_get_json", lambda endpoint: [])
+    monkeypatch.setattr(publisher, "_run_gh", gh)
+
+    result = publisher.publish(assets, ENV)
+
+    assert "left preview release" in result
+    assert [call[:2] for call in calls] == [["release", "create"], ["release", "upload"]]
+
+
 @pytest.mark.parametrize(
     ("key", "value"),
     [
