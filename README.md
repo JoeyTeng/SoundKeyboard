@@ -26,21 +26,25 @@
 
 ```text
 ├── main.py                       # 主程序入口
+├── audio_engine.py               # Platform-independent audio engine
+├── tests/                         # Automated tests
+├── .github/workflows/ci.yml      # CI workflow
 ├── build.spec                    # PyInstaller 打包配置
-├── requirements.txt              # Python 依赖列表
+├── pyproject.toml                # Project metadata and dependency groups
+├── uv.lock                       # Locked dependency versions
+├── requirements.txt              # Exported compatibility dependency list
 ├── rule.example.json             # 示例规则映射配置文件
 ├── run.bat                       # Windows 快速启动脚本
 ├── README.md                     # README 文件
 └── LICENSE                       # 许可证文件
 ```
 
-> **注意**：程序首次运行或保存配置时，会自动在同目录下生成默认音效包文件夹以保存你的自定义设置。
+> **注意**：程序首次运行或保存配置时，会自动生成默认音效包文件夹以保存你的自定义设置。源码运行时，该文件夹位于 `audio_engine.py` 旁；打包运行时，它位于可执行文件旁。默认音效包为空；导入或添加音频后才能播放音效。
 
 ## 环境要求
 
-- **操作系统**: Windows 7/10/11（推荐 Windows 10/11）
-- **Python**: 3.10 或更高版本 (若使用源码运行)
-- **底层依赖**: 依赖 Windows API (Win32) 进行窗口前台及按键模拟操作，目前仅支持 Windows 系统。
+- **Python**: 3.10–3.12 (for source development)
+- **Runtime support**: The native keyboard input path uses Win32 and the desktop runtime is currently Windows-only. macOS CI checks the platform-independent audio engine and validates app packaging; starting the native app and global keyboard input on macOS are not supported yet.
 
 ## 快速开始
 
@@ -50,32 +54,27 @@
 ### 从源码运行
 
 **方法一**：
-在 Windows 环境下，直接双击运行项目目录中的 [`run.bat`](run.bat)。
+On Windows, run [`run.bat`](run.bat) from the project directory. It installs the locked dependencies with `uv` and starts the application.
 
 **方法二（手动纯命令行操作）**：
 
-1. **克隆或下载项目**
+1. Clone the project and enter its directory:
    
    ```bash
-   git clone https://github.com/PizzaDark/SoundKeyboard.git
+   git clone https://github.com/JoeyTeng/SoundKeyboard.git
    cd SoundKeyboard
    ```
    
-2. **安装依赖**
+2. Install the locked dependencies (install [uv](https://docs.astral.sh/uv/) first):
 
    ```bash
-   # 推荐使用 Python 3.10+
-   python -m venv .venv
-   .venv\Scripts\activate # Windows
-   source .venv/bin/activate # macOS/Linux
-   
-   pip install -r requirements.txt
+   uv sync --locked
    ```
 
-3. **运行程序**
+3. Start the application on Windows:
 
    ```bash
-   python main.py
+   uv run --locked main.py
    ```
 
 ## 音效包与规则配置指南
@@ -88,13 +87,29 @@
 
 ## 构建可执行文件
 
-本项目支持使用 PyInstaller 打包为独立的 Windows 桌面程序：
+Install the build dependency group and create the Windows executable or macOS packaging artifact:
 
 ```bash
-pyinstaller build.spec
+uv sync --locked --no-default-groups --group build
+uv run --locked --no-sync pyinstaller --clean --noconfirm build.spec
 ```
 
-打包完成后，独立的 `.exe` 程序及相关依赖将生成在 `dist/` 目录下。
+The build output is written to `dist/`. The macOS `.app` produced by this command is currently packaging validation only; native macOS startup and keyboard input are planned for a separate follow-up change. In a frozen build, the default sound pack is stored next to the executable.
+
+## Development and CI
+
+The project targets Python 3.10–3.12. `pyproject.toml` defines project dependencies and development tools, while `uv.lock` records the exact resolved versions. `requirements.txt` is an exported compatibility artifact; use `uv` and the lockfile for project development.
+
+Install development dependencies and run the checks locally:
+
+```bash
+uv sync --locked --group dev
+uv run --locked ruff check .
+uv run --locked ruff format --check .
+uv run --locked pytest
+```
+
+CI runs lint checks and the test suite on Windows and macOS with Python 3.10 and 3.12. It builds on both operating systems with Python 3.12, runs a Windows executable smoke test, and packages the macOS `.app`. The stable `CI required` status gates lint, all test matrix jobs, and both builds. The Windows-only `--smoke-test` mode uses SDL's dummy audio driver and a temporary sound pack, installs no global keyboard hook, and exits after 200 ms. The macOS checks exercise the extracted platform-independent `audio_engine.py` and app packaging; they do not establish native macOS application startup or global keyboard input support.
 
 ## 依赖库
 

@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SDL_AUDIODRIVER: dummy
+  QT_QPA_PLATFORM: offscreen
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: 0.11.14
+          enable-cache: true
+      - name: Install locked development dependencies
+        run: uv sync --locked --group dev
+      - name: Check lint
+        run: uv run --locked ruff check .
+      - name: Check formatting
+        run: uv run --locked ruff format --check .
+
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: 0.11.14
+          enable-cache: true
+      - name: Install locked development dependencies
+        run: uv sync --locked --group dev --python "${{ matrix.python-version }}"
+      - name: Run tests
+        run: uv run --locked --python "${{ matrix.python-version }}" pytest
+
+  build:
+    needs: [lint, test]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: 0.11.14
+          enable-cache: true
+      - name: Install locked application and build dependencies
+        run: uv sync --locked --no-default-groups --group build
+      - name: Build application
+        run: uv run --locked --no-sync pyinstaller --clean --noconfirm build.spec
+      - name: Smoke test Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath "dist/SoundKeyboard.exe" -ArgumentList "--smoke-test" -Wait -PassThru
+          exit $process.ExitCode
+      - name: Package macOS app
+        if: runner.os == 'macOS'
+        run: ditto -c -k --sequesterRsrc --keepParent dist/SoundKeyboard.app dist/SoundKeyboard-macos.zip
+      - name: Upload Windows executable
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: SoundKeyboard-windows
+          path: dist/SoundKeyboard.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload macOS app archive
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: SoundKeyboard-macos
+          path: dist/SoundKeyboard-macos.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  required:
+    name: CI required
+    if: ${{ always() }}
+    needs: [lint, test, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every validation job to pass
+        env:
+          LINT_RESULT: ${{ needs.lint.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          test "$LINT_RESULT" = success
+          test "$TEST_RESULT" = success
+          test "$BUILD_RESULT" = success
