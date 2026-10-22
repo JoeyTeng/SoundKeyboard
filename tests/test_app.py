@@ -8,6 +8,7 @@ from PyQt5.QtGui import QKeyEvent
 from PyQt5.QtWidgets import QApplication
 
 import main
+import platform_input
 
 
 class FakeBackend:
@@ -62,6 +63,27 @@ def test_startup_without_global_input(window):
     assert not window._fg_timer.isActive()
     assert "space" in window.audio.rules
     assert "a" in window.buttons
+
+
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_every_virtual_key_has_a_native_posting_mapping(app, monkeypatch, tmp_path, platform):
+    monkeypatch.setattr(main.sys, "platform", platform)
+    monkeypatch.setattr(main, "create_backend", FakeBackend)
+    widget = main.VirtualKeyboardApp(enable_global_input=False, pack_dir=str(tmp_path))
+    try:
+        mapping = (
+            platform_input._MAC_POST_KEYCODES
+            if platform == "darwin"
+            else platform_input._WINDOWS_VK_MAP
+        )
+        assert set(widget.buttons) <= mapping.keys()
+        assert ("ins" in widget.buttons) is (platform == "win32")
+    finally:
+        widget.shutdown()
+        widget.tray_icon.hide()
+        widget.settings_dialog.close()
+        widget.close()
+        app.processEvents()
 
 
 def test_keyboard_repeat_and_simulated_input(window):

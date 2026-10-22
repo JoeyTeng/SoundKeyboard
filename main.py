@@ -750,7 +750,7 @@ class VirtualKeyboardApp(QWidget):
         if sys.platform == "darwin":
             labels = {"win": "⌘ CMD", "alt": "⌥ OPT", "ctrl": "⌃ CTRL", "del": "⌦"}
             self.rows_def = [
-                [(key, labels.get(key, label), width) for key, label, width in row]
+                [(key, labels.get(key, label), width) for key, label, width in row if key != "ins"]
                 for row in self.rows_def
             ]
 

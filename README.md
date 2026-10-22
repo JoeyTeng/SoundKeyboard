@@ -49,7 +49,7 @@ On macOS, open **System Settings → Privacy & Security** and grant SoundKeyboar
 
 See Apple's guides for [Input Monitoring](https://support.apple.com/en-ie/guide/mac-help/mchl4cedafb6/27/mac/27) and [Accessibility access](https://support.apple.com/en-ie/guide/mac-help/mh43185/27/mac/27).
 
-Password and other secure input fields may suppress global keystroke monitoring. macOS and applications also reserve some system shortcuts, so those shortcuts may not be captured or remapped reliably. Physical key positions use ANSI keyboard mapping. Option and Command are shown using the canonical `alt` and `win` key names for compatibility with existing rules.
+Password and other secure input fields may suppress global keystroke monitoring. macOS and applications also reserve some system shortcuts, so those shortcuts may not be captured or remapped reliably. Physical key positions use ANSI keyboard mapping. Option and Command are shown using the canonical `alt` and `win` key names for compatibility with existing rules. The macOS on-screen layout omits Insert, which has no native posting mapping.
 
 ## 快速开始
 
