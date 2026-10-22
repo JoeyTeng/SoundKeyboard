@@ -44,31 +44,23 @@ def test_create_backend_selects_platform_lazily(monkeypatch):
 
 def _modifier_backend():
     backend = input_api.MacOSBackend()
-    physical = {56: False, 60: False}
     backend._quartz = SimpleNamespace(
-        kCGEventFlagMaskShift=1,
-        kCGEventFlagMaskControl=2,
-        kCGEventSourceStateHIDSystemState=99,
-        CGEventSourceKeyState=lambda state, keycode: physical.get(keycode, False),
-        CGEventGetFlags=lambda event: event.flags,
+        CGEventSourceKeyState=lambda *args: False,
+        CGEventGetFlags=lambda event: getattr(event, "flags", 0),
     )
     events = []
     backend._tokens[object()] = events.append
     backend._stop_tap = lambda: None
-    return backend, physical, events
+    return backend, events
 
 
 def test_mac_flags_changed_tracks_both_modifier_sides_and_release_cleanup():
-    backend, physical, events = _modifier_backend()
-    left_shift = SimpleNamespace(flags=1)
-    right_shift = SimpleNamespace(flags=1)
-    released_shift = SimpleNamespace(flags=1)
-
-    physical[56] = True
+    backend, events = _modifier_backend()
+    left_shift = SimpleNamespace(flags=0x2)
+    right_shift = SimpleNamespace(flags=0x6)
+    released_shift = SimpleNamespace(flags=0x4)
     backend._dispatch_modifier(56, left_shift)
-    physical[60] = True
     backend._dispatch_modifier(60, right_shift)
-    physical[56] = False
     backend._dispatch_modifier(56, released_shift)
     assert [(event.name, event.event_type) for event in events] == [
         ("shift", "down"),
@@ -83,40 +75,49 @@ def test_mac_flags_changed_tracks_both_modifier_sides_and_release_cleanup():
 
 
 def test_mac_releasing_left_shift_held_before_listening_does_not_create_a_press():
-    backend, physical, events = _modifier_backend()
-    physical.update({56: True, 60: True})
+    backend, events = _modifier_backend()
 
     # Both physical keys were down before the tap observed either transition.
-    physical[56] = False
-    backend._dispatch_modifier(56, SimpleNamespace(flags=1))
+    backend._dispatch_modifier(56, SimpleNamespace(flags=0x4))
     assert backend._held_modifiers == {}
     assert events == []
 
-    physical[60] = False
     backend._dispatch_modifier(60, SimpleNamespace(flags=0))
     assert backend._held_modifiers == {}
     assert events == []
 
 
 def test_mac_missed_modifier_release_is_reconciled_before_later_press():
-    backend, physical, events = _modifier_backend()
-    physical[56] = True
-    backend._dispatch_modifier(56, SimpleNamespace(flags=1))
+    backend, events = _modifier_backend()
+    backend._dispatch_modifier(56, SimpleNamespace(flags=0x2))
 
     # Model a later ordinary hardware event after the modifier's release event
-    # was dropped by Quartz; reconciliation queries tracked keys only.
-    physical[56] = False
-    backend._sync_held_modifiers()
+    # was dropped by Quartz; its event-time flags snapshot shows the key up.
+    backend._sync_held_modifiers(0)
     assert events == [
         input_api.KeyEvent("shift", input_api.KEY_DOWN, None),
         input_api.KeyEvent("shift", input_api.KEY_UP, None),
     ]
     assert backend._held_modifiers == {}
 
-    physical[56] = True
-    backend._dispatch_modifier(56, SimpleNamespace(flags=1))
+    backend._dispatch_modifier(56, SimpleNamespace(flags=0x2))
     assert events[-1] == input_api.KeyEvent("shift", input_api.KEY_DOWN, None)
     assert backend._held_modifiers == {56: "shift"}
+
+
+def test_mac_queued_modifier_tap_uses_event_time_flags_not_current_state():
+    backend, events = _modifier_backend()
+    # Quartz delivered both snapshots after the key was physically released;
+    # the mock live query deliberately reports false for both events.
+    backend._dispatch_modifier(56, SimpleNamespace(flags=0x2))
+    backend._sync_held_modifiers(0)
+    backend._dispatch_modifier(56, SimpleNamespace(flags=0))
+
+    assert events == [
+        input_api.KeyEvent("shift", input_api.KEY_DOWN, None),
+        input_api.KeyEvent("shift", input_api.KEY_UP, None),
+    ]
+    assert backend._held_modifiers == {}
 
 
 def test_mac_event_tap_ignores_private_synthetic_marker():
@@ -133,6 +134,7 @@ def test_mac_event_tap_ignores_private_synthetic_marker():
         kCGHeadInsertEventTap=2,
         kCGEventTapOptionListenOnly=3,
         CGEventTapEnable=lambda *_: None,
+        CGEventGetFlags=lambda event: getattr(event, "flags", 0),
         CGEventGetIntegerValueField=lambda event, field: event.values[field],
     )
     seen = []
@@ -166,7 +168,6 @@ def test_mac_event_tap_ignores_private_synthetic_marker():
 
 def test_mac_disabled_tap_releases_held_modifiers_and_later_press_works():
     backend = input_api.MacOSBackend()
-    physical = {56: False}
     callbacks = {}
     enabled = []
     native = SimpleNamespace(
@@ -178,12 +179,11 @@ def test_mac_disabled_tap_releases_held_modifiers_and_later_press_works():
         kCGEventSourceUserData=20,
         kCGKeyboardEventKeycode=21,
         kCGEventSourceStateHIDSystemState=99,
-        kCGEventFlagMaskShift=1,
         kCGSessionEventTap=1,
         kCGHeadInsertEventTap=2,
         kCGEventTapOptionListenOnly=3,
         CGEventTapEnable=lambda tap, value: enabled.append(value),
-        CGEventSourceKeyState=lambda state, keycode: physical.get(keycode, False),
+        CGEventSourceKeyState=lambda *_: False,
         CGEventGetFlags=lambda event: event.get("flags", 0),
         CGEventGetIntegerValueField=lambda event, field: event.get(field, 0),
     )
@@ -197,12 +197,9 @@ def test_mac_disabled_tap_releases_held_modifiers_and_later_press_works():
 
     def run_loop():
         callback = callbacks["tap"]
-        physical[56] = True
-        callback(None, 12, {20: 0, 21: 56, "flags": 1}, None)
-        physical[56] = False
+        callback(None, 12, {20: 0, 21: 56, "flags": 0x2}, None)
         callback(None, 13, {}, None)
-        physical[56] = True
-        callback(None, 12, {20: 0, 21: 56, "flags": 1}, None)
+        callback(None, 12, {20: 0, 21: 56, "flags": 0x2}, None)
 
     native.CGEventTapCreate = create_tap
     backend._core_foundation = SimpleNamespace(
@@ -242,6 +239,7 @@ def test_mac_disabled_tap_releases_ordinary_key_and_later_press_works():
         kCGHeadInsertEventTap=2,
         kCGEventTapOptionListenOnly=3,
         CGEventTapEnable=lambda *_: None,
+        CGEventGetFlags=lambda event: event.get("flags", 0),
         CGEventGetIntegerValueField=lambda event, field: event.get(field, 0),
     )
     backend._quartz = native
@@ -404,3 +402,6 @@ def test_real_quartz_event_wrapper_api_roundtrip_without_posting():
     marker = 0x534B4244
     Quartz.CGEventSetIntegerValueField(event, Quartz.kCGEventSourceUserData, marker)
     assert Quartz.CGEventGetIntegerValueField(event, Quartz.kCGEventSourceUserData) == marker
+    left_shift_device_flag = input_api._MAC_MODIFIER_DEVICE_FLAGS[56]
+    Quartz.CGEventSetFlags(event, left_shift_device_flag)
+    assert Quartz.CGEventGetFlags(event) & left_shift_device_flag

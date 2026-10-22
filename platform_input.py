@@ -455,6 +455,20 @@ _MAC_KEYCODES: dict[int, str] = {
     114: "help",
 }
 
+# Apple's IOKit/hidsystem/IOLLEvent.h defines the NX_DEVICEL* and NX_DEVICER*
+# masks preserved in Quartz event flags; these bits identify the physical side.
+# Values: LControl=0x1, LShift=0x2, RShift=0x4, LCommand=0x8,
+# RCommand=0x10, LOption=0x20, ROption=0x40, RControl=0x2000.
+_MAC_MODIFIER_DEVICE_FLAGS = {
+    54: 0x0010,  # RCommand
+    55: 0x0008,  # LCommand
+    56: 0x0002,  # LShift
+    60: 0x0004,  # RShift
+    58: 0x0020,  # LOption
+    61: 0x0040,  # ROption
+    59: 0x0001,  # LControl
+    62: 0x2000,  # RControl
+}
 _MAC_MODIFIERS = {
     54: ("rcmd", "kCGEventFlagMaskCommand"),
     55: ("cmd", "kCGEventFlagMaskCommand"),
@@ -618,12 +632,13 @@ class MacOSBackend:
                 # A missed modifier release can leave tracked state behind.
                 # Reconcile only keys we previously saw go down; discovering
                 # arbitrary held keys here would create synthetic presses.
-                self._sync_held_modifiers()
+                event_flags = int(quartz.CGEventGetFlags(event))
+                self._sync_held_modifiers(event_flags)
                 keycode = int(
                     quartz.CGEventGetIntegerValueField(event, quartz.kCGKeyboardEventKeycode)
                 )
                 if event_type == flags_changed:
-                    self._dispatch_modifier(keycode, event)
+                    self._dispatch_modifier(keycode, event, event_flags)
                 elif event_type in (down, up):
                     name = _MAC_KEYCODES.get(keycode)
                     if name:
@@ -693,7 +708,7 @@ class MacOSBackend:
             except Exception:
                 pass
 
-    def _dispatch_modifier(self, keycode: int, event: Any) -> None:
+    def _dispatch_modifier(self, keycode: int, event: Any, flags: int | None = None) -> None:
         modifier = _MAC_MODIFIERS.get(keycode)
         if modifier is None:
             return
@@ -704,15 +719,8 @@ class MacOSBackend:
             self._dispatch(KeyEvent(name, KEY_DOWN, None))
             self._dispatch(KeyEvent(name, KEY_UP, None))
             return
-        is_down = self._physical_key_is_down(keycode)
-        if is_down is None:
-            # Keep a conservative compatibility fallback for Quartz wrappers
-            # that lack the key-state API. Do not infer an unseen down from an
-            # aggregate flag after listening starts.
-            if keycode in self._held_modifiers:
-                self._held_modifiers.pop(keycode, None)
-                self._dispatch(KeyEvent(name, KEY_UP, None))
-            return
+        event_flags = int(self._quartz.CGEventGetFlags(event)) if flags is None else flags
+        is_down = bool(event_flags & _MAC_MODIFIER_DEVICE_FLAGS[keycode])
         was_down = keycode in self._held_modifiers
         if is_down and not was_down:
             self._held_modifiers[keycode] = name
@@ -721,24 +729,13 @@ class MacOSBackend:
             self._held_modifiers.pop(keycode, None)
             self._dispatch(KeyEvent(name, KEY_UP, None))
 
-    def _physical_key_is_down(self, keycode: int) -> bool | None:
-        """Read one physical key's state without using aggregate modifier flags."""
-        quartz = self._quartz
-        state_query = getattr(quartz, "CGEventSourceKeyState", None)
-        state_id = getattr(quartz, "kCGEventSourceStateHIDSystemState", None)
-        if state_query is None or state_id is None:
-            return None
-        try:
-            return bool(state_query(state_id, keycode))
-        except Exception:
-            return None
-
-    def _sync_held_modifiers(self) -> None:
-        """Release tracked modifiers whose physical key is no longer down."""
+    def _sync_held_modifiers(self, event_flags: int) -> None:
+        """Release tracked modifiers absent from this hardware event snapshot."""
         releases: list[KeyEvent] = []
         with self._lock:
             for keycode, name in tuple(self._held_modifiers.items()):
-                if self._physical_key_is_down(keycode) is False:
+                flag = _MAC_MODIFIER_DEVICE_FLAGS.get(keycode, 0)
+                if not event_flags & flag:
                     self._held_modifiers.pop(keycode, None)
                     releases.append(KeyEvent(name, KEY_UP, None))
         for event in releases:
