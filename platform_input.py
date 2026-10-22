@@ -508,6 +508,7 @@ class MacOSBackend:
         self._startup_error: BaseException | None = None
         self._lock = threading.RLock()
         self._simulation_lock = threading.Lock()
+        self._held_keys: set[str] = set()
         self._held_modifiers: dict[int, str] = {}
         self._simulating = False
         self._quartz = None
@@ -603,7 +604,7 @@ class MacOSBackend:
                     event_type == quartz.kCGEventTapDisabledByTimeout
                     or event_type == quartz.kCGEventTapDisabledByUserInput
                 ):
-                    self._release_held_modifiers()
+                    self._release_held_keys()
                     if self._tap is not None:
                         quartz.CGEventTapEnable(self._tap, True)
                     return event
@@ -681,6 +682,10 @@ class MacOSBackend:
 
     def _dispatch(self, event: KeyEvent) -> None:
         with self._lock:
+            if event.event_type == KEY_DOWN:
+                self._held_keys.add(event.name)
+            elif event.event_type == KEY_UP:
+                self._held_keys.discard(event.name)
             callbacks = tuple(self._tokens.values())
         for callback in callbacks:
             try:
@@ -739,10 +744,10 @@ class MacOSBackend:
         for event in releases:
             self._dispatch(event)
 
-    def _release_held_modifiers(self) -> None:
-        releases: list[KeyEvent] = []
+    def _release_held_keys(self) -> None:
         with self._lock:
-            releases = [KeyEvent(name, KEY_UP, None) for name in self._held_modifiers.values()]
+            releases = [KeyEvent(name, KEY_UP, None) for name in self._held_keys]
+            self._held_keys.clear()
             self._held_modifiers.clear()
         for event in releases:
             self._dispatch(event)
@@ -752,25 +757,15 @@ class MacOSBackend:
             self._tokens.pop(token, None)
             stop = not self._tokens
             if stop:
+                self._held_keys.clear()
                 self._held_modifiers.clear()
         if stop:
             self._stop_tap()
 
     def unhook_all(self) -> None:
-        releases: list[KeyEvent] = []
-        callbacks: tuple[Callable[[KeyEvent], Any], ...] = ()
+        self._release_held_keys()
         with self._lock:
-            if self._held_modifiers:
-                releases = [KeyEvent(name, KEY_UP, None) for name in self._held_modifiers.values()]
-                self._held_modifiers.clear()
-                callbacks = tuple(self._tokens.values())
             self._tokens.clear()
-        for event in releases:
-            for callback in callbacks:
-                try:
-                    callback(event)
-                except Exception:
-                    pass
         self._stop_tap()
 
     def _stop_tap(self) -> None:

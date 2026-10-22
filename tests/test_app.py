@@ -143,6 +143,23 @@ def test_capture_fallback_modifier_names_match_native_backend(
     dialog.close()
 
 
+@pytest.mark.parametrize(
+    ("qt_key", "canonical"),
+    [(Qt.Key_F1 + offset, f"f{offset + 1}") for offset in range(12)]
+    + [(Qt.Key_Insert, "ins"), (Qt.Key_Menu, "menu")],
+)
+def test_capture_fallback_handles_non_text_keys(window, app, qt_key, canonical):
+    window.backend.error = "No global access"
+    dialog = main.KeyCaptureDialog(window.settings_dialog)
+    dialog.show()
+    app.processEvents()
+    event = QKeyEvent(QKeyEvent.KeyPress, qt_key, Qt.NoModifier, "")
+    dialog.keyPressEvent(event)
+    assert dialog.captured_key == canonical
+    assert dialog.btn_ok.isEnabled()
+    dialog.close()
+
+
 def test_capture_from_listener_thread_updates_ui_on_main_thread(window, app):
     dialog = main.KeyCaptureDialog(window.settings_dialog)
     dialog.show()

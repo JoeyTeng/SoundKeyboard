@@ -227,6 +227,75 @@ def test_mac_disabled_tap_releases_held_modifiers_and_later_press_works():
     assert backend._held_modifiers == {56: "shift"}
 
 
+def test_mac_disabled_tap_releases_ordinary_key_and_later_press_works():
+    backend = input_api.MacOSBackend()
+    callbacks = {}
+    native = SimpleNamespace(
+        kCGEventKeyDown=10,
+        kCGEventKeyUp=11,
+        kCGEventFlagsChanged=12,
+        kCGEventTapDisabledByTimeout=13,
+        kCGEventTapDisabledByUserInput=14,
+        kCGEventSourceUserData=20,
+        kCGKeyboardEventKeycode=21,
+        kCGSessionEventTap=1,
+        kCGHeadInsertEventTap=2,
+        kCGEventTapOptionListenOnly=3,
+        CGEventTapEnable=lambda *_: None,
+        CGEventGetIntegerValueField=lambda event, field: event.get(field, 0),
+    )
+    backend._quartz = native
+    events = []
+    backend._tokens[object()] = events.append
+
+    def create_tap(location, placement, options, mask, callback, user_info):
+        callbacks["tap"] = callback
+        return object()
+
+    def run_loop():
+        callback = callbacks["tap"]
+        callback(None, 10, {20: 0, 21: 49}, None)
+        callback(None, 13, {}, None)
+        callback(None, 10, {20: 0, 21: 49}, None)
+
+    native.CGEventTapCreate = create_tap
+    backend._core_foundation = SimpleNamespace(
+        CFMachPortCreateRunLoopSource=lambda *_: "source",
+        CFRunLoopGetCurrent=lambda: "loop",
+        CFRunLoopAddSource=lambda *_: None,
+        kCFRunLoopDefaultMode="default",
+        CFRunLoopRun=run_loop,
+        CFRunLoopRemoveSource=lambda *_: None,
+        CFMachPortInvalidate=lambda *_: None,
+    )
+    backend._ready = threading.Event()
+    backend._stop_requested = threading.Event()
+    backend._tap_thread_main()
+
+    assert events == [
+        input_api.KeyEvent("space", input_api.KEY_DOWN, None),
+        input_api.KeyEvent("space", input_api.KEY_UP, None),
+        input_api.KeyEvent("space", input_api.KEY_DOWN, None),
+    ]
+    assert backend._held_keys == {"space"}
+
+
+def test_mac_unhook_all_releases_ordinary_keys_before_removing_callbacks():
+    backend = input_api.MacOSBackend()
+    events = []
+    backend._tokens[object()] = events.append
+    backend._dispatch(input_api.KeyEvent("space", input_api.KEY_DOWN, None))
+
+    backend.unhook_all()
+
+    assert events == [
+        input_api.KeyEvent("space", input_api.KEY_DOWN, None),
+        input_api.KeyEvent("space", input_api.KEY_UP, None),
+    ]
+    assert backend._held_keys == set()
+    assert backend._tokens == {}
+
+
 def test_mac_permission_failure_is_clear_and_does_not_start_tap():
     backend = input_api.MacOSBackend()
     backend._quartz = SimpleNamespace(CGPreflightListenEventAccess=lambda: False)

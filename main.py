@@ -97,6 +97,8 @@ class KeyCaptureDialog(QDialog):
             Qt.Key_Escape: "esc",
             Qt.Key_Backspace: "back",
             Qt.Key_Delete: "del",
+            Qt.Key_Insert: "ins",
+            Qt.Key_Menu: "menu",
             Qt.Key_Shift: "shift",
             Qt.Key_Control: "ctrl",
             Qt.Key_Alt: "alt",
@@ -112,6 +114,7 @@ class KeyCaptureDialog(QDialog):
             Qt.Key_PageUp: "pageup",
             Qt.Key_PageDown: "pagedown",
         }
+        keys.update({Qt.Key_F1 + offset: f"f{offset + 1}" for offset in range(12)})
         if sys.platform == "darwin":
             # Qt maps Command to Key_Control and Control to Key_Meta on macOS.
             keys.update({Qt.Key_Control: "win", Qt.Key_Meta: "ctrl"})
