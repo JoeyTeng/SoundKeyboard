@@ -57,6 +57,8 @@ Password and other secure input fields may suppress global keystroke monitoring.
 
 Download a build from [GitHub Releases](https://github.com/JoeyTeng/SoundKeyboard/releases). Packaged builds include Python and the application dependencies; you do not need Python or uv to run them.
 
+CI automatically publishes a preview for the current `main` commit after lint, tests, and all three packaged startup checks pass. Find the newest preview at the top of the Releases page. Previews use commit-specific `preview-<commit>` tags and include a `SHA256SUMS.txt` checksum file alongside the downloads.
+
 | Download | Platform | How to run |
 | --- | --- | --- |
 | `SoundKeyboard-windows-x86_64.exe` | Windows, Intel/AMD 64-bit | Save it in a writable folder and double-click it. |
@@ -137,7 +139,7 @@ uv sync --locked --no-default-groups --group build
 uv run --locked --no-sync pyinstaller --clean --noconfirm build.spec
 ```
 
-The build output is written under `dist/`. The stable CI workflow required for changes runs lint, formatting, and tests on Python 3.10 and 3.12 on Windows and macOS, and builds the Windows `.exe` plus a macOS `.app` archive. The macOS workflow also runs a packaged silent startup smoke check. The macOS app is not Developer ID signed or notarized. CI does not validate physical keyboard behavior, audio playback, or macOS TCC permission setup; those still require manual checks on the target machine.
+The build output is written under `dist/`. The stable CI workflow required for changes runs lint, formatting, and tests on Python 3.10 and 3.12 on Windows and macOS. It builds a Windows x86_64 `.exe` and separate macOS arm64/x86_64 `.app.zip` archives, then smoke-tests the final executable or extracted app. Successful pushes to `main` publish previews to GitHub Releases; pull requests and manual CI runs build and test only. The macOS app is not Developer ID signed or notarized. CI does not validate physical keyboard behavior, audio playback, or macOS TCC permission setup; those still require manual checks on the target machine.
 
 ## 依赖库
 
