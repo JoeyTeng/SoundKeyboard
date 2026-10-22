@@ -1,43 +1,75 @@
-# -*- mode: python ; coding: utf-8 -*-
+import sys
+from pathlib import Path
 
-block_cipher = None
+root = Path(SPECPATH)
+icon = root / "sound_keyboard.ico"
 
 a = Analysis(
-    ['main.py'],
-    pathex=[],
+    [str(root / "main.py")],
+    pathex=[str(root)],
     binaries=[],
-    datas=[('sound_keyboard.ico', '.')],
-    hiddenimports=[],
+    datas=[(str(icon), ".")],
+    hiddenimports=["keyboard"] if sys.platform == "win32" else [],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['scipy', 'matplotlib', 'tkinter'],  # 强制排除不相关的重库，追求极小体积
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
+    excludes=["scipy", "matplotlib", "tkinter"],
     noarchive=False,
 )
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
-    name='SoundKeyboard',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,                   # 无黑框
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon=['sound_keyboard.ico'],     # 打包图标
-)
+if sys.platform == "win32":
+    EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        [],
+        name="SoundKeyboard",
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        console=False,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon=str(icon),
+    )
+else:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name="SoundKeyboard",
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        console=False,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+    )
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=False,
+        name="SoundKeyboard",
+    )
+    BUNDLE(
+        coll,
+        name="SoundKeyboard.app",
+        icon=None,
+        bundle_identifier="com.pizzadark.soundkeyboard",
+        info_plist={"CFBundleName": "SoundKeyboard"},
+    )

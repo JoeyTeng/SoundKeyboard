@@ -4,4 +4,8 @@ __pycache__/
 *.exe
 build/
 dist/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.DS_Store
 default_pack
