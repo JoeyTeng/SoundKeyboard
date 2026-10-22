@@ -8,7 +8,7 @@ a = Analysis(
     [str(root / "main.py")],
     pathex=[str(root)],
     binaries=[],
-    datas=[(str(icon), ".")],
+    datas=[(str(icon), "."), (str(root / "LICENSE"), ".")],
     hiddenimports=(
         ["keyboard"]
         if sys.platform == "win32"

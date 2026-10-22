@@ -55,7 +55,24 @@ Password and other secure input fields may suppress global keystroke monitoring.
 
 ### Run a release build
 
-On Windows, download and run the `.exe`. On macOS, download and open the `.app` archive. The macOS app is not Developer ID signed or notarized, so macOS may require you to approve opening it in Privacy & Security.
+Download a build from [GitHub Releases](https://github.com/JoeyTeng/SoundKeyboard/releases). Packaged builds include Python and the application dependencies; you do not need Python or uv to run them.
+
+| Download | Platform | How to run |
+| --- | --- | --- |
+| `SoundKeyboard-windows-x86_64.exe` | Windows, Intel/AMD 64-bit | Save it in a writable folder and double-click it. |
+| `SoundKeyboard-macos-arm64.app.zip` | macOS, Apple Silicon (M-series) | Extract it and move `SoundKeyboard.app` to Applications. |
+| `SoundKeyboard-macos-x86_64.app.zip` | macOS, Intel | Extract it and move `SoundKeyboard.app` to Applications. |
+
+The Windows executable is not code-signed. The macOS app is ad-hoc signed, but is not Developer ID signed or notarized. macOS may require you to approve opening it in **System Settings → Privacy & Security → Open Anyway**, after first trying to open the app. See [Apple's instructions](https://support.apple.com/102445).
+
+If macOS still blocks a build you downloaded from this repository, you can remove the quarantine attribute from that app bundle only, then open it:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/SoundKeyboard.app"
+open "/Applications/SoundKeyboard.app"
+```
+
+Adjust the quoted path if you installed the app elsewhere. This does not grant Input Monitoring or Accessibility permission; complete the permissions setup above before using global keyboard features.
 
 The default pack is created automatically when needed. Source runs store it in the `default_pack` directory beside `main.py`, regardless of the current working directory. Packaged macOS app data is stored at `~/Library/Application Support/SoundKeyboard/default_pack`; on Windows, it remains next to the executable. You can import another sound pack from the settings panel.
 

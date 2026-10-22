@@ -62,7 +62,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        include:
+          - os: windows-latest
+            target: windows-x86_64
+            expected_arch: X64
+          - os: macos-15
+            target: macos-arm64
+            expected_arch: ARM64
+          - os: macos-15-intel
+            target: macos-x86_64
+            expected_arch: X64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -72,37 +81,49 @@ jobs:
         with:
           version: 0.11.14
           enable-cache: true
+      - name: Verify runner architecture on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_ARCH -ne '${{ matrix.expected_arch }}') {
+            throw "Expected ${{ matrix.expected_arch }} runner, got $env:RUNNER_ARCH"
+          }
+      - name: Verify runner architecture on macOS
+        if: runner.os == 'macOS'
+        env:
+          EXPECTED_ARCH: ${{ matrix.expected_arch }}
+        run: test "$RUNNER_ARCH" = "$EXPECTED_ARCH"
       - name: Install locked application and build dependencies
         run: uv sync --locked --no-default-groups --group build
       - name: Build application
         run: uv run --locked --no-sync pyinstaller --clean --noconfirm build.spec
-      - name: Smoke test Windows executable
+      - name: Package Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Copy-Item -Path "dist/SoundKeyboard.exe" -Destination "dist/SoundKeyboard-${{ matrix.target }}.exe"
+      - name: Package macOS app
+        if: runner.os == 'macOS'
+        run: ditto -c -k --sequesterRsrc --keepParent dist/SoundKeyboard.app dist/SoundKeyboard-${{ matrix.target }}.app.zip
+      - name: Smoke test packaged Windows executable
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $process = Start-Process -FilePath "dist/SoundKeyboard.exe" -ArgumentList "--smoke-test" -Wait -PassThru
+          $process = Start-Process -FilePath "dist/SoundKeyboard-${{ matrix.target }}.exe" -ArgumentList "--smoke-test" -Wait -PassThru
           exit $process.ExitCode
-      - name: Smoke test macOS app
+      - name: Smoke test packaged macOS app
         if: runner.os == 'macOS'
-        run: dist/SoundKeyboard.app/Contents/MacOS/SoundKeyboard --smoke-test
-      - name: Package macOS app
-        if: runner.os == 'macOS'
-        run: ditto -c -k --sequesterRsrc --keepParent dist/SoundKeyboard.app dist/SoundKeyboard-macos.zip
-      - name: Upload Windows executable
-        if: runner.os == 'Windows'
+        run: |
+          roundtrip_dir="$RUNNER_TEMP/SoundKeyboard-${{ matrix.target }}"
+          mkdir -p "$roundtrip_dir"
+          ditto -x -k "dist/SoundKeyboard-${{ matrix.target }}.app.zip" "$roundtrip_dir"
+          app_path="$roundtrip_dir/SoundKeyboard.app"
+          codesign --verify --deep --strict "$app_path"
+          "$app_path/Contents/MacOS/SoundKeyboard" --smoke-test
+      - name: Upload runnable build asset
         uses: actions/upload-artifact@v4
         with:
-          name: SoundKeyboard-windows
-          path: dist/SoundKeyboard.exe
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload macOS app archive
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
-        with:
-          name: SoundKeyboard-macos
-          path: dist/SoundKeyboard-macos.zip
+          name: SoundKeyboard-${{ matrix.target }}
+          path: dist/SoundKeyboard-${{ matrix.target }}*
           if-no-files-found: error
           retention-days: 14
 
